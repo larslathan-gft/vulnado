@@ -1,4 +1,4 @@
-name: AI Impact Full Pipeline
+name: AI Impact Full Pipeline - Windows
 
 on:
   workflow_dispatch:

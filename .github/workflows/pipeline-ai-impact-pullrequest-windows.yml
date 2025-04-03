@@ -1,4 +1,4 @@
-name: AI Impact Pull Request Trigger
+name: AI Impact Pull Request Trigger Windows
 
 on:
   pull_request:
