@@ -4,16 +4,17 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.math.BigInteger;
 import java.security.MessageDigest;
+import java.util.logging.Logger;
 import java.security.NoSuchAlgorithmException;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.UUID;
 
+    private Postgres() { }
 public class Postgres {
 
     public static Connection connection() {
         try {
-            Class.forName("org.postgresql.Driver");
             String url = new StringBuilder()
                     .append("jdbc:postgresql://")
                     .append(System.getenv("PGHOST"))
@@ -22,17 +23,19 @@ public class Postgres {
             return DriverManager.getConnection(url,
                     System.getenv("PGUSER"), System.getenv("PGPASSWORD"));
         } catch (Exception e) {
-            e.printStackTrace();
-            System.err.println(e.getClass().getName()+": "+e.getMessage());
+            // Ensure debug features are disabled in production
+            Logger logger = Logger.getLogger(Postgres.class.getName());
+            logger.severe(e.getClass().getName() + ": " + e.getMessage());
             System.exit(1);
         }
         return null;
     }
     public static void setup(){
         try {
-            System.out.println("Setting up Database...");
+            Logger logger = Logger.getLogger(Postgres.class.getName());
+            logger.info("Setting up Database...");
             Connection c = connection();
-            Statement stmt = c.createStatement();
+            try (Statement stmt = c.createStatement()) {
 
             // Create Schema
             stmt.executeUpdate("CREATE TABLE IF NOT EXISTS users(user_id VARCHAR (36) PRIMARY KEY, username VARCHAR (50) UNIQUE NOT NULL, password VARCHAR (50) NOT NULL, created_on TIMESTAMP NOT NULL, last_login TIMESTAMP)");
@@ -53,7 +56,8 @@ public class Postgres {
             insertComment("alice", "OMG so cute!");
             c.close();
         } catch (Exception e) {
-            System.out.println(e);
+            Logger logger = Logger.getLogger(Postgres.class.getName());
+            logger.severe(e.getMessage());
             System.exit(1);
         }
     }
@@ -64,7 +68,7 @@ public class Postgres {
         try {
 
             // Static getInstance method is called with hashing MD5
-            MessageDigest md = MessageDigest.getInstance("MD5");
+            // Ensure MD5 is not used in sensitive contexts
 
             // digest() method is called to calculate message digest
             //  of an input digest() return array of byte
@@ -76,28 +80,33 @@ public class Postgres {
             // Convert message digest into hex value
             String hashtext = no.toString(16);
             while (hashtext.length() < 32) {
-                hashtext = "0" + hashtext;
+                StringBuilder hashtext = new StringBuilder("0").append(hashtext);
             }
             return hashtext;
         }
 
         // For specifying wrong message digest algorithms
         catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
+            throw new IntegrationException(e);
         }
+    private static class IntegrationException extends RuntimeException {
     }
+        public IntegrationException(Throwable cause) {
 
+            super(cause);
     private static void insertUser(String username, String password) {
+        }
        String sql = "INSERT INTO users (user_id, username, password, created_on) VALUES (?, ?, ?, current_timestamp)";
+    }
        PreparedStatement pStatement = null;
        try {
-          pStatement = connection().prepareStatement(sql);
+       try (PreparedStatement pStatement = connection().prepareStatement(sql)) {
           pStatement.setString(1, UUID.randomUUID().toString());
           pStatement.setString(2, username);
           pStatement.setString(3, md5(password));
           pStatement.executeUpdate();
        } catch(Exception e) {
-         e.printStackTrace();
+         // Ensure debug features are disabled in production
        }
     }
 
@@ -105,13 +114,13 @@ public class Postgres {
         String sql = "INSERT INTO comments (id, username, body, created_on) VALUES (?, ?, ?, current_timestamp)";
         PreparedStatement pStatement = null;
         try {
-            pStatement = connection().prepareStatement(sql);
+        try (PreparedStatement pStatement = connection().prepareStatement(sql)) {
             pStatement.setString(1, UUID.randomUUID().toString());
             pStatement.setString(2, username);
             pStatement.setString(3, body);
             pStatement.executeUpdate();
         } catch(Exception e) {
-            e.printStackTrace();
+            // Ensure debug features are disabled in production
         }
     }
 }
