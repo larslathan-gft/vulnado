@@ -1,0 +1,85 @@
+name: AI Impact Pull Request Trigger
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  repository-projects: write
+
+jobs:
+  trigger_api:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate with Keycloak
+        id: keycloak_auth
+        run: |
+          $headers = @{
+            "Content-Type" = "application/x-www-form-urlencoded"
+          }
+
+          $body = @{
+            client_id = "ai-impact-client"
+            username = "administrator"
+            password = "Gft@2025"
+            scope    = "openid"
+            grant_type = "password"
+          }
+
+          $response = Invoke-RestMethod -Method Post -Uri "http://auth.gftaiimpact.local/realms/ai-impact/protocol/openid-connect/token" -Headers $headers -Body $body
+          $accessToken = $response.access_token
+
+          if (-not $accessToken -or $accessToken -eq "null") {
+            Write-Host "Failed to obtain access token"
+            Write-Host ($response | ConvertTo-Json -Depth 10)
+            exit 1
+          }
+
+          Write-Host "Access token retrieved"
+          "access_token=$accessToken" >> $env:GITHUB_ENV
+
+      - name: Trigger Code Review API
+        id: send_code_review
+        run: |
+          $response = Invoke-RestMethod -Uri "http://api.gftaiimpact.local/ai/review" -Method Post -Headers @{
+            Authorization = "Bearer $env:access_token"
+          } -Form @{
+            RunName = "CodeReview"
+            PromptId = "CodeReviewer__CodeReviewer_V1_Conventions"
+            Llm = "${{ vars.LLM }}"
+            PullRequestId = "${{ github.event.pull_request.number }}"
+            RepoName = "${{ github.repository }}"
+            AdditionalInstructions = ""
+            jobName = "DemoCodeReviewerGithub"
+            Conventions = "Header,Description,Summary,Recomendations,VulnExplanation"
+          }
+
+          Write-Host "API Response: $response"
+          "job_id=$response" >> $env:GITHUB_ENV
+
+      - name: Monitor Code Review Job Status
+        id: monitor_code_review_status
+        run: |
+          $jobId = "${{ env.job_id }}"
+          $status = "Pending"
+
+          while ($status -ne "Completed") {
+            $checkResponse = Invoke-RestMethod -Uri "http://api.gftaiimpact.local/ai/jobs/$jobId/status" -Headers @{
+              Authorization = "Bearer $env:access_token"
+            }
+
+            $status = $checkResponse.status
+            Write-Host "Current status: $status"
+            Start-Sleep -Seconds 10
+          }
+
+          Write-Host "Final status: $status"

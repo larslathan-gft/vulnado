@@ -1,0 +1,159 @@
+name: AI Impact Full Pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  repository-projects: write
+
+jobs:
+  generate_tests:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate with Keycloak
+        id: keycloak_auth
+        shell: powershell
+        run: |
+          $headers = @{ "Content-Type" = "application/x-www-form-urlencoded" }
+          $body = @{
+            client_id = "ai-impact-client"
+            username = "administrator"
+            password = "Gft@2025"
+            scope    = "openid"
+            grant_type = "password"
+          }
+          $response = Invoke-RestMethod -Uri "http://auth.gftaiimpact.local/realms/ai-impact/protocol/openid-connect/token" -Method Post -Headers $headers -Body $body
+          if (-not $response.access_token) { Write-Host "❌ Failed to obtain token"; exit 1 }
+          "access_token=$($response.access_token)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Checkout the branch
+        shell: powershell
+        run: |
+          git fetch origin "${{ github.event.pull_request.head.ref }}"
+          git checkout "${{ github.event.pull_request.head.ref }}"
+
+      - name: Create Classes List
+        id: changes
+        shell: powershell
+        run: |
+          $files = Get-ChildItem -Path "src/main/java/com/scalesec/vulnado" -Recurse -Filter "*.java" | ForEach-Object { $_.FullName }
+          if (-not $files) { Write-Host "No Java files found"; exit 1 }
+          "java_files<<EOF`n$($files -join "`n")`nEOF" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Prepare and Send to API (TestCreator)
+        id: send_api
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Net.Http
+          $httpClient = [System.Net.Http.HttpClient]::new()
+          $multipartContent = [System.Net.Http.MultipartFormDataContent]::new()
+
+          $javaFiles = "${{ env.java_files }}" -split "`n"
+          foreach ($file in $javaFiles) {
+            if (-not [string]::IsNullOrWhiteSpace($file)) {
+              $file = $file.Trim()
+              $className = [System.IO.Path]::GetFileNameWithoutExtension($file)
+              $testFile = "src/test/java/com/scalesec/vulnado/${className}Tests.java"
+
+              $fileStream = [System.IO.FileStream]::new($file, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
+              $fileContent = [System.Net.Http.StreamContent]::new($fileStream)
+              $multipartContent.Add($fileContent, "files", [System.IO.Path]::GetFileName($file))
+
+              if (Test-Path $testFile) {
+                $testStream = [System.IO.FileStream]::new($testFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read)
+                $testContent = [System.Net.Http.StreamContent]::new($testStream)
+                $multipartContent.Add($testContent, "ExistingTests", [System.IO.Path]::GetFileName($testFile))
+              }
+            }
+          }
+
+          $multipartContent.Add([System.Net.Http.StringContent]::new("GenerateTests"), "RunName")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("DemoTestCreator"), "jobName")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("*.java"), "SearchPattern")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("java"), "TargetExtension")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("TestCreator__CreateUnitTests_V1"), "PromptId")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("Java"), "SourceCodeLanguage")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("Unit"), "TestType")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("MSTEST,MOQ"), "TestingFrameworks")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("${{ vars.LLM }}"), "Llm")
+          $multipartContent.Add([System.Net.Http.StringContent]::new("Generate only the source code, without any extra information"), "AdditionalInstructions")
+
+          $request = [System.Net.Http.HttpRequestMessage]::new("POST", "http://api.gftaiimpact.local/ai/test")
+          $request.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new("Bearer", "$env:access_token")
+          $request.Content = $multipartContent
+
+          $response = $httpClient.SendAsync($request).Result
+          $body = $response.Content.ReadAsStringAsync().Result
+
+          Write-Host "API Response: $body"
+
+          "job_id=$body" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Monitor Job Status
+        id: monitor_status
+        shell: powershell
+        run: |
+          $jobId = $env:job_id
+          if (-not $jobId) {
+            Write-Host "❌ job_id is missing. Cannot monitor status."
+            exit 1
+          }
+          $status = "Pending"
+          do {
+            Start-Sleep -Seconds 10
+            $url = "http://api.gftaiimpact.local/ai/jobs/$jobId/status"
+            $response = Invoke-RestMethod -Uri $url -Headers @{ Authorization = "Bearer $env:access_token" }
+            $status = $response.status
+            Write-Host "Status: $status"
+          } while ($status -ne "Completed")
+          $uris = $response.results.output.uri -join "`n"
+          "output_uris<<EOF`n$uris`nEOF" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Save Generated Tests
+        shell: powershell
+        run: |
+          $uris = "${{ env.output_uris }}" -split "`n"
+          foreach ($uri in $uris) {
+            if (-not [string]::IsNullOrWhiteSpace($uri)) {
+              $cleanUri = $uri.Trim()
+              $content = Invoke-RestMethod -Uri "http://api.gftaiimpact.local$cleanUri" -Headers @{ Authorization = "Bearer $env:access_token" }
+
+              $fileName = [System.IO.Path]::GetFileName($cleanUri)
+              $name = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+
+              $path = "src/test/java/com/scalesec/vulnado/${name}Tests.java"
+
+              New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+              $content | Out-File $path -Encoding utf8
+            }
+          }
+
+      - name: Commit and Push Generated Files
+        shell: powershell
+        run: |
+          git config --global user.name 'gft-ai-impact[bot]'
+          git config --global user.email 'ai-impact[bot]@gft.com'
+          git add .
+          git commit -m "Add generated Documentations and Unit Tests"
+          git push --set-upstream origin "${{ github.event.pull_request.head.ref }}"
+
+      - name: Create Pull Request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: "AI Impact documentation and Unit Tests"
+          title: "Documentation and Unit Tests created by AI Impact"
+          body: "Pull request created by AI Impact CodeDocumenter and CodeTester."
+          branch: "tester-by-ai"
+          delete-branch: true
+          add-paths: |
+            ./**/*.java
+            ./**/*.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+          labels: "auto-generated, tests"
+          draft: false
