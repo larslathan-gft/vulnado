@@ -16,7 +16,7 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +52,8 @@ jobs:
         run: |
           $response = Invoke-RestMethod -Uri "http://api.gftaiimpact.local/ai/review" -Method Post -Headers @{
             Authorization = "Bearer $env:access_token"
-          } -Form @{
+            "Content-Type" = "application/x-www-form-urlencoded"
+          } -Body @{
             RunName = "CodeReview"
             PromptId = "CodeReviewer__CodeReviewer_V1_Conventions"
             Llm = "${{ vars.LLM }}"
