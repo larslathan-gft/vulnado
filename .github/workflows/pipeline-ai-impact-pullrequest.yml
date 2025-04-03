@@ -2,7 +2,8 @@ name: AI Impact Pull Request Trigger
 on:
   pull_request:
     branches:
-      - master      
+      - master
+            
 
 permissions:
   contents: write
