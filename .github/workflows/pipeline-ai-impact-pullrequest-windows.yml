@@ -52,7 +52,7 @@ jobs:
         run: |
           $response = Invoke-RestMethod -Uri "http://api.gftaiimpact.local/ai/review" -Method Post -Headers @{
             Authorization = "Bearer $env:access_token"
-            Content-Type = "application/x-www-form-urlencoded"
+            "Content-Type" = "application/x-www-form-urlencoded"
           } -Body @{
             RunName = "CodeReview"
             PromptId = "CodeReviewer__CodeReviewer_V1_Conventions"
