@@ -11,7 +11,8 @@ public class VulnadoApplicationTests {
 
 	@Test
 	public void contextLoads() {
-	}
+        // This method is intentionally left empty as it is not required for the current implementation.
+        throw new UnsupportedOperationException("Method not implemented");
 
 }
 
