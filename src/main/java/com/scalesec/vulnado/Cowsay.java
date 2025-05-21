@@ -1,14 +1,17 @@
 package com.scalesec.vulnado;
+import java.util.logging.Level;
 
 import java.io.BufferedReader;
+import java.util.logging.Logger;
 import java.io.InputStreamReader;
 
+private Cowsay() {}
 public class Cowsay {
   public static String run(String input) {
     ProcessBuilder processBuilder = new ProcessBuilder();
     String cmd = "/usr/games/cowsay '" + input + "'";
-    System.out.println(cmd);
-    processBuilder.command("bash", "-c", cmd);
+    logger.log(Level.INFO, cmd);
+    processBuilder.command("/usr/games/cowsay", input);
 
     StringBuilder output = new StringBuilder();
 
@@ -21,7 +24,7 @@ public class Cowsay {
         output.append(line + "\n");
       }
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.severe(e.getMessage());
     }
     return output.toString();
   }
