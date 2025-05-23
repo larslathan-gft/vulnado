@@ -1,6 +1,5 @@
 package com.scalesec.vulnado;
 
-import org.apache.catalina.Server;
 import java.sql.*;
 import java.util.Date;
 import java.util.List;
@@ -8,10 +7,12 @@ import java.util.ArrayList;
 import java.util.UUID;
 
 public class Comment {
-  public String id, username, body;
+  private String id;
+  private String username;
   public Timestamp created_on;
+  private String body;
 
-  public Comment(String id, String username, String body, Timestamp created_on) {
+  private Timestamp createdOn;
     this.id = id;
     this.username = username;
     this.body = body;
@@ -33,14 +34,14 @@ public class Comment {
     }
   }
 
-  public static List<Comment> fetch_all() {
+  public static List<Comment> fetchAll() {
     Statement stmt = null;
-    List<Comment> comments = new ArrayList();
+    List<Comment> comments = new ArrayList<>();
     try {
       Connection cxn = Postgres.connection();
-      stmt = cxn.createStatement();
+      try (Statement stmt = cxn.createStatement()) {
 
-      String query = "select * from comments;";
+      String query = "SELECT id, username, body, created_on FROM comments;";
       ResultSet rs = stmt.executeQuery(query);
       while (rs.next()) {
         String id = rs.getString("id");
@@ -52,22 +53,19 @@ public class Comment {
       }
       cxn.close();
     } catch (Exception e) {
-      e.printStackTrace();
-      System.err.println(e.getClass().getName()+": "+e.getMessage());
+      Logger.getLogger(Comment.class.getName()).log(Level.SEVERE, null, e);
     } finally {
-      return comments;
     }
   }
 
-  public static Boolean delete(String id) {
+  public static boolean delete(String id) {
     try {
       String sql = "DELETE FROM comments where id = ?";
       Connection con = Postgres.connection();
-      PreparedStatement pStatement = con.prepareStatement(sql);
+      try (PreparedStatement pStatement = con.prepareStatement(sql)) {
       pStatement.setString(1, id);
       return 1 == pStatement.executeUpdate();
     } catch(Exception e) {
-      e.printStackTrace();
     } finally {
       return false;
     }
@@ -76,7 +74,7 @@ public class Comment {
   private Boolean commit() throws SQLException {
     String sql = "INSERT INTO comments (id, username, body, created_on) VALUES (?,?,?,?)";
     Connection con = Postgres.connection();
-    PreparedStatement pStatement = con.prepareStatement(sql);
+    try (PreparedStatement pStatement = con.prepareStatement(sql)) {
     pStatement.setString(1, this.id);
     pStatement.setString(2, this.username);
     pStatement.setString(3, this.body);
